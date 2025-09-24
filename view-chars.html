@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>View non-printable unicode characters — Vanilla JS</title>
+<style type="text/css">
+body { font-family: Helvetica, Arial, sans-serif; background-color: #EEEEEE; }
+div.main { background-color: white; border-radius: 10px; border: 2px solid #666666; box-shadow: 5px 5px 5px #999999; padding: 2.4em 3em; margin: 0 auto; max-width: 1000px; }
+
+/* Output area */
+#output { margin: 3em 0; border: 1px solid #666666; padding: 0.4em 0.2em; font-family: Courier New, Courier, monospace; cursor: default; }
+#output.nowrap { white-space: nowrap; overflow: auto; }
+#output span.symbol { color: white; background-color: #999999; padding: 0 2px; margin: 0 2px; }
+#output span.hex { color: black; background-color: #9999FF; padding: 0 2px; margin: 0 2px; }
+
+/* Tooltip */
+span.S2Tooltip.anchor { white-space: nowrap; }
+span.S2Tooltip.container { position: absolute; z-index: 999; left: -99999px; top: -99999px; }
+span.S2Tooltip.anchor:hover { background-color: #FF9999; }
+span.S2Tooltip.anchor:hover + span.S2Tooltip.container { left: auto; top: auto; }
+span.S2Tooltip.tiptext { position: absolute; left: -2em; top: 1.5em; padding: 0.5em 0.8em 0.7em 0.8em; color: black; background-color: #DDDDFF; border: 1px solid #9999FF; font-weight: normal; text-align: left; display: block; text-indent: 0; }
+
+button { cursor: pointer; }
+.notice { margin-top: .5rem; font-size: .9rem; }
+.notice.error { color: #721c24; background: #f8d7da; border: 1px solid #f5c6cb; padding: .4rem .6rem; border-radius: 6px; }
+
+/* Test area */
+#testArea { margin-top: 1.5rem; }
+#testOutput { background: #f7f7f7; border: 1px solid #ccc; padding: .6rem; border-radius: 8px; max-height: 260px; overflow: auto; }
+.pass { color: #155724; }
+.fail { color: #721c24; }
+</style>
+</head>
+<body>
+<div class="main">
+  <h1>View non-printable unicode characters</h1>
+  <p>Online tool to display non-printable characters that may be hidden in copy&amp;pasted strings.</p>
+
+  <form id="theForm" action="#" method="post" accept-charset="UTF-8">
+    <div style="margin-top: 3em;">Please paste the string here:</div>
+    <div>
+      <textarea id="input" name="s" rows="8" cols="40" style="width: 100%; box-sizing: border-box;" dir="auto"></textarea>
+    </div>
+    <div style="margin-top: .6em; display: flex; gap: .6em; align-items: center; flex-wrap: wrap;">
+      <button type="submit">Show me the characters</button>
+      <button type="button" id="reset">Reset sample</button>
+      <button type="button" id="copy">Copy input</button>
+      <button type="button" id="clear">Clear</button>
+      <label style="display:inline-flex; align-items:center; gap:.35em;">
+        <input type="checkbox" id="nowrap" /> No wrap
+      </label>
+      <span id="counts" aria-live="polite"></span>
+    </div>
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+  </form>
+
+  <div id="output" dir="auto"></div>
+
+  <details id="testArea">
+    <summary><strong>Self-tests</strong></summary>
+    <div style="margin:.6rem 0; display:flex; gap:.6rem; align-items:center; flex-wrap:wrap;">
+      <button type="button" id="runTests">Run self-tests</button>
+      <span id="testSummary"></span>
+    </div>
+    <pre id="testOutput" aria-live="polite"></pre>
+  </details>
+
+  <h2>Helpful Sites for Details on UTF Characters</h2>
+  <ul>
+    <li><a href="https://www.branah.com/unicode-converter" target="_blank" rel="noreferrer noopener">Branah.com Unicode Converter</a></li>
+    <li><a href="http://www.fileformat.info/info/unicode/char/search.htm" target="_blank" rel="noreferrer noopener">FileFormat.Info</a></li>
+    <li><a href="http://utf8-chartable.de/unicode-utf8-table.pl" target="_blank" rel="noreferrer noopener">utf8-chartable.de</a></li>
+  </ul>
+
+  <h2>Privacy Note</h2>
+  <p>This web page (tool) does not store any information about you (no cookies, no IP logging) and it does not store any of the text that is written or pasted into the box above.</p>
+  <h2>Source Code</h2>
+  <p>Original PHP tool was published on <a href="https://www.soscisurvey.de/tools/view-chars.php" target="_blank" rel="noreferrer noopener">soscisurvey.de</a> and <a href="https://github.com/BurninLeo/see-non-printable-characters" target="_blank" rel="noreferrer noopener">GitHub</a>. This page is a vanilla JS port.</p>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  const outputEl = document.getElementById('output');
+  const inputEl = document.getElementById('input');
+  const countsEl = document.getElementById('counts');
+  const formEl = document.getElementById('theForm');
+  const resetEl = document.getElementById('reset');
+  const copyEl = document.getElementById('copy');
+  const clearEl = document.getElementById('clear');
+  const nowrapEl = document.getElementById('nowrap');
+  const noticeEl = document.getElementById('notice');
+  const runTestsBtn = document.getElementById('runTests');
+  const testOut = document.getElementById('testOutput');
+  const testSummary = document.getElementById('testSummary');
+
+  // Matches PHP demo default: json_decode("\"See\\u00A0what's hidden in your string\\u2026\tor be\\\\u200Bhind\\uFEFF\"")
+  // Use a direct JS string literal to avoid JSON.parse issues with \u escapes (e.g., \uFEFF)
+  const defaultStr = "See\u00A0what's hidden in your string\u2026\tor be\\u200Bhind\uFEFF";
+
+  inputEl.value = defaultStr;
+
+  function escapeHtml(s){
+    return s.replace(/[&<>\"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[ch]));
+  }
+
+  function padHex(cp){
+    const h = cp.toString(16).toUpperCase();
+    return (h.length < 4) ? ('0000' + h).slice(-4) : h; // at least 4
+  }
+
+  // One char tooltip HTML
+  function htmlChar(ch){
+    const cp = ch.codePointAt(0);
+    const isAscii = cp <= 0x7F;
+
+    let desc, hexLabel;
+    if(isAscii){
+      const dec = cp;
+      const hx2 = dec.toString(16).toUpperCase().padStart(2,'0');
+      desc = dec + '<br>\r\n' + '0x' + hx2;
+      hexLabel = hx2;
+    } else {
+      const hx = padHex(cp);
+      desc = '&amp;#' + cp + ';<br>\r\n' + '\\u' + hx;
+      hexLabel = 'U+' + hx;
+    }
+
+    let symbol;
+    if(ch === '\r'){
+      symbol = '<span class="symbol S2Tooltip anchor">CR</span>';
+    } else if(ch === '\n'){
+      symbol = '<span class="symbol S2Tooltip anchor">LF</span>';
+    } else if(ch === '\t'){
+      symbol = '<span class="symbol S2Tooltip anchor">⟶</span>&#8203;';
+    } else if(ch === ' '){
+      symbol = '<span class="white S2Tooltip anchor">·</span>&#8203;';
+    } else {
+      // Printable categories L,M,N,P,S (Unicode property escapes)
+      if(/^[\p{L}\p{M}\p{N}\p{P}\p{S}]$/u.test(ch)){
+        symbol = '<span class="S2Tooltip anchor">' + escapeHtml(ch) + '</span>';
+      } else {
+        symbol = '<span class="hex S2Tooltip anchor">' + hexLabel + '</span>';
+      }
+    }
+
+    return symbol +
+      '<span class="S2Tooltip container">' +
+      '<span class="S2Tooltip tiptext rounded shadow">' + desc + '</span>' +
+      '</span>';
+  }
+
+  // Render whole string using CR/LF layout behavior equivalent to PHP version
+  function text2html(str){
+    let html = '';
+    let nlc = 0; // 0=none, 1=CR, 2=LF
+
+    // Iterate by Unicode code points
+    for(const ch of str){
+      if(ch === '\r'){
+        if(nlc === 0){ nlc = 1; html += htmlChar(ch); }
+        else if(nlc === 1){ html += '<br>\r\n' + htmlChar(ch); nlc = 1; }
+        else if(nlc === 2){ html += htmlChar(ch) + '<br>\r\n'; nlc = 0; }
+      } else if(ch === '\n'){
+        const sym = htmlChar(ch);
+        if(nlc === 0){ nlc = 2; html += sym; }
+        else if(nlc === 2){ html += '<br>\r\n' + htmlChar(ch); nlc = 2; }
+        else if(nlc === 1){ html += htmlChar(ch) + '<br>\r\n'; nlc = 0; }
+      } else {
+        html += htmlChar(ch);
+      }
+    }
+
+    return html; // return inner HTML only; container is #output
+  }
+
+  function updateCounts(str){
+    const chars = Array.from(str).length; // code points
+    const bytes = new TextEncoder().encode(str).length; // UTF-8 bytes
+    countsEl.textContent = chars + ' characters, ' + bytes + ' bytes';
+  }
+
+  function render(){
+    try{
+      noticeEl.textContent = '';
+      noticeEl.className = 'notice';
+      const s = inputEl.value;
+      outputEl.classList.toggle('nowrap', nowrapEl && nowrapEl.checked);
+      outputEl.innerHTML = text2html(s);
+      updateCounts(s);
+    } catch(err){
+      noticeEl.textContent = 'Render error: ' + String((err && err.message) || err);
+      noticeEl.className = 'notice error';
+    }
+  }
+
+  formEl.addEventListener('submit', function(e){ e.preventDefault(); render(); });
+  inputEl.addEventListener('input', debounce(render, 120));
+  resetEl.addEventListener('click', function(){ inputEl.value = defaultStr; render(); });
+  copyEl.addEventListener('click', async function(){
+    try { await navigator.clipboard.writeText(inputEl.value); noticeEl.textContent = 'Copied to clipboard.'; noticeEl.className = 'notice'; }
+    catch(e){ noticeEl.textContent = 'Copy failed: ' + String((e && e.message) || e); noticeEl.className = 'notice error'; }
+  });
+  clearEl.addEventListener('click', function(){ inputEl.value = ''; render(); });
+  if (nowrapEl) { nowrapEl.addEventListener('change', render); }
+
+  function debounce(fn, ms){
+    let t; return function(){ clearTimeout(t); t = setTimeout(fn, ms); };
+  }
+
+  // Expose minimal test API (no private internals leaked beyond what’s useful for tests)
+  window.UNICODE_VIEWER_TEST_API = { htmlChar, text2html };
+
+  // Initial render
+  render();
+
+  // --------------------
+  // Self-tests
+  // --------------------
+  function runTests(){
+    const t = [];
+    const api = window.UNICODE_VIEWER_TEST_API;
+
+    function assert(name, cond){
+      t.push({ name, pass: !!cond });
+    }
+
+    // Test 1: TAB renders arrow symbol
+    assert('TAB → contains arrow', /⟶/.test(api.htmlChar('\t')));
+
+    // Test 2: SPACE renders middle dot
+    assert('SPACE → contains middle dot', /·/.test(api.htmlChar(' ')));
+
+    // Test 3: CR/LF tokens present
+    assert('CR → labeled CR', />CR< /.test(api.htmlChar('\r').replace(/\n/g,' ')) === false ? />CR< /.test(api.htmlChar('\r')) : true);
+    assert('LF → labeled LF', />LF</.test(api.htmlChar('\n')));
+
+    // Test 4: Zero-width space U+200B becomes hex label
+    assert('U+200B → hex label present', /U\+200B/.test(api.htmlChar('\u200B')));
+
+    // Test 5: Printable letter 'A'
+    assert("Printable 'A' → shows literal", />A</.test(api.htmlChar('A')));
+
+    // Test 6: text2html returns inner HTML only (no outer div)
+    const inner = api.text2html('A');
+    assert('text2html no outer container', !/<div[^>]*class=\"output\"/i.test(inner));
+
+    // Test 7: Default sample renders without throwing and updates counts
+    try { outputEl.innerHTML = api.text2html(defaultStr); updateCounts(defaultStr); assert('Render default sample no-throw', true); }
+    catch(e){ assert('Render default sample no-throw', false); }
+
+    // Report
+    const passed = t.filter(x=>x.pass).length;
+    const total = t.length;
+    testSummary.textContent = passed + '/' + total + ' tests passed';
+    testOut.textContent = t.map(x => (x.pass ? '✓ ' : '✗ ') + x.name).join('\n');
+
+    // Color hint
+    testSummary.className = (passed === total) ? 'pass' : 'fail';
+  }
+
+  runTestsBtn.addEventListener('click', runTests);
+})();
+</script>
+</body>
+</html>
